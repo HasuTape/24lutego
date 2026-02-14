@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>24 Lutego - Morska Bijatyka</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: linear-gradient(135deg, #0a1128 0%, #1a1a2e 100%);
+            color: #fff; 
+            font-family: 'Segoe UI', Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+            padding: 10px;
+        }
+        #gameTitle { 
+            font-size: clamp(20px, 3.5vw, 42px);
+            font-weight: bold;
+            text-shadow: 3px 3px 6px rgba(0,0,0,0.8);
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #ffd700, #ffed4e);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        canvas { 
+            border: 4px solid #0f3460;
+            box-shadow: 0 0 30px rgba(15, 52, 96, 0.8);
+            border-radius: 8px;
+            max-width: 100vw;
+            max-height: 70vh;
+            width: auto;
+            height: auto;
+        }
+        #info { 
+            margin-top: 10px;
+            font-size: clamp(12px, 1.5vw, 20px);
+            text-align: center;
+            background: rgba(15, 52, 96, 0.6);
+            padding: 8px 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+        #quests {
+            margin-top: 10px;
+            background: rgba(15, 52, 96, 0.7);
+            padding: 10px;
+            border-radius: 8px;
+            min-width: auto;
+            max-width: 95vw;
+            font-size: clamp(10px, 1.2vw, 16px);
+        }
+        .quest {
+            padding: 6px;
+            margin: 4px 0;
+            background: rgba(0,0,0,0.3);
+            border-radius: 5px;
+            border-left: 4px solid #ffd700;
+        }
+        .quest.completed {
+            border-left-color: #00ff00;
+            opacity: 0.7;
+        }
+        #achievements {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.9);
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #ffd700;
+            min-width: 200px;
+            display: none;
+            font-size: clamp(10px, 1.2vw, 14px);
+        }
+        .achievement {
+            padding: 8px;
+            margin: 4px 0;
+            background: linear-gradient(90deg, #1a1a2e, #0f3460);
+            border-radius: 5px;
+            border-left: 4px solid #ffd700;
+            animation: slideIn 0.5s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(300px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        #controls { 
+            margin-top: 10px;
+            background: rgba(15, 52, 96, 0.7);
+            padding: 10px 15px;
+            border-radius: 8px;
+            max-width: 95vw;
+            line-height: 1.6;
+            font-size: clamp(10px, 1.2vw, 16px);
+        }
+        .key { 
+            background: linear-gradient(135deg, #e94560, #c72c41);
+            padding: 3px 8px;
+            border-radius: 5px;
+            font-weight: bold;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+        }
+        .section { margin: 6px 0; }
+    </style>
+</head>
+<body>
+    <h1 id="gameTitle">⚓ 24 LUTEGO - MORSKA BIJATYKA ⚓</h1>
+    <canvas id="game" width="1200" height="700"></canvas>
+    <div id="info">Ładowanie...</div>
+    <div id="quests">
+        <h3>📜 ZADANIA:</h3>
+        <div class="quest" id="quest1">❌ Zatop 2 statki (w tym "Róży Pąk")</div>
+        <div class="quest" id="quest2">❌ Przejmij 2 statki przez abordaż</div>
+    </div>
+    <div id="achievements"></div>
+    <div id="controls">
+        <div class="section"><b>🚢 RUCH:</b> <span class="key">W/A/S/D</span> - Poruszaj statkiem</div>
+        <div class="section"><b>💣 ARMATY:</b> <span class="key">1-5</span> Lewa burta | <span class="key">6-0</span> Prawa burta | <span class="key">R</span> Przeładuj (0.5s cooldown)</div>
+        <div class="section"><b>⚔️ ABORDAŻ:</b> Podpłyń blisko wroga → <span class="key">SPACJA</span> → System kostek z dogrywkami!</div>
+        <div class="section"><b>🎯 CEL:</b> Ukończ wszystkie zadania i dopłyń do brzegów Anglii!</div>
+    </div>
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        const info = document.getElementById('info');
+
+        let gameState = 'story';
+        let storyPhase = 0;
+        let storyTimer = 0;
+        let playerShip = { x: 600, y: 550, hp: 100, cannons: [1,1,1,1,1,1,1,1,1,1], reloading: false, speedX: 0, speedY: 0, cannonCooldown: 0 };
+        let enemyShips = [];
+        let alliedShips = [];
+        let cannonballs = [];
+        let enemyCannonballs = [];
+        let waveNumber = 0;
+        let boardingFight = { 
+            playerRoll: 0,
+            enemyRoll: 0,
+            currentEnemy: null, 
+            waitingForRoll: true, 
+            message: '', 
+            animating: false
+        };
+        let fogOffset = 0;
+        let quests = {
+            sunkShips: 0,
+            sunkRozyPak: false,
+            capturedShips: 0
+        };
+        let achievements = [];
+        let englandX = 0;
+
+        const keys = {};
+        document.addEventListener('keydown', e => {
+            keys[e.key] = true;
+            handleInput(e.key);
+        });
+        document.addEventListener('keyup', e => keys[e.key] = false);
+
+        function handleInput(key) {
+            if (gameState === 'story' && key === ' ') {
+                storyPhase++;
+                if (storyPhase > 2) {
+                    spawnWave(1);
+                    gameState = 'battle';
+                }
+                return;
+            }
+            if (gameState === 'battle') {
+                if (key >= '1' && key <= '5') {
+                    fireCannon(parseInt(key) - 1, 'left');
+                }
+                if (key >= '6' && key <= '9') {
+                    fireCannon(parseInt(key) - 1, 'right');
+                }
+                if (key === '0') {
+                    fireCannon(9, 'right');
+                }
+                if (key === 'r' || key === 'R') {
+                    reloadAll();
+                }
+                const nearEnemy = enemyShips.find(e => e.alive && !e.fleeing && Math.abs(e.x - playerShip.x) < 90 && Math.abs(e.y - playerShip.y) < 90);
+                if (key === ' ' && nearEnemy) {
+                    gameState = 'boarding';
+                    boardingFight = { 
+                        playerRoll: 0,
+                        enemyRoll: 0,
+                        currentEnemy: nearEnemy, 
+                        waitingForRoll: true, 
+                        message: 'Wciśnij SPACJĘ aby rzucić kostką!', 
+                        animating: false
+                    };
+                }
+            }
+            if (gameState === 'boarding' && key === ' ' && boardingFight.waitingForRoll) {
+                rollDice();
+            }
+            if (gameState === 'ending' && key === ' ') {
+                location.reload();
+            }
+        }
+
+        function fireCannon(idx, side) {
+            if (playerShip.cannons[idx] === 1 && !playerShip.reloading && playerShip.cannonCooldown === 0) {
+                playerShip.cannons[idx] = 0;
+                playerShip.cannonCooldown = 30;
+                const isLeft = idx < 5;
+                const vx = isLeft ? -10 : 10;
+                const offsetX = isLeft ? -35 : 35;
+                cannonballs.push({ x: playerShip.x + offsetX, y: playerShip.y, vx: vx, vy: 0 });
+                
+                alliedShips.forEach(ally => {
+                    if (ally.cannons[idx] === 1) {
+                        ally.cannons[idx] = 0;
+                        cannonballs.push({ x: ally.x + offsetX, y: ally.y, vx: vx, vy: 0 });
+                    }
+                });
+            }
+        }
+
+        function reloadAll() {
+            if (!playerShip.reloading) {
+                playerShip.reloading = true;
+                setTimeout(() => {
+                    playerShip.cannons = [1,1,1,1,1,1,1,1,1,1];
+                    alliedShips.forEach(ally => {
+                        ally.cannons = [1,1,1,1,1,1,1,1,1,1];
+                    });
+                    playerShip.reloading = false;
+                }, 500);
+            }
+        }
+
+        function spawnWave(wave) {
+            waveNumber = wave;
+            if (wave === 1) {
+                enemyShips.push({ name: 'Goździk Li', x: 250, y: 250, hp: 100, maxHp: 100, alive: true, shootTimer: 0, cannons: [1,1,1,1,1,1,1,1,1,1], fleeing: false });
+            } else if (wave === 2) {
+                enemyShips.push({ name: 'Róży Pąk', x: 950, y: 250, hp: 50, maxHp: 50, alive: true, shootTimer: 0, cannons: [1,1,1,1,1,1,1,1,1,1], fleeing: false, isRozyPak: true });
+            } else if (wave === 3) {
+                enemyShips.push({ name: 'Pirat 1', x: 200, y: 200, hp: 60, maxHp: 60, alive: true, shootTimer: 0, cannons: [1,1,1,1,1,1,1,1,1,1], fleeing: false });
+                enemyShips.push({ name: 'Pirat 2', x: 1000, y: 200, hp: 60, maxHp: 60, alive: true, shootTimer: 10, cannons: [1,1,1,1,1,1,1,1,1,1], fleeing: false });
+                enemyShips.push({ name: 'Pirat 3', x: 300, y: 400, hp: 60, maxHp: 60, alive: true, shootTimer: 20, cannons: [1,1,1,1,1,1,1,1,1,1], fleeing: false });
+                enemyShips.push({ name: 'Pirat 4', x: 900, y: 400, hp: 60, maxHp: 60, alive: true, shootTimer: 30, cannons: [1,1,1,1,1,1,1,1,1,1], fleeing: false });
+                enemyShips.push({ name: 'Pirat 5', x: 600, y: 150, hp: 60, maxHp: 60, alive: true, shootTimer: 40, cannons: [1,1,1,1,1,1,1,1,1,1], fleeing: false, willFlee: true });
+            }
+        }
+
+        function checkQuests() {
+            const q1 = document.getElementById('quest1');
+            const q2 = document.getElementById('quest2');
+            
+            if (quests.sunkShips >= 2 && quests.sunkRozyPak) {
+                q1.innerHTML = '✅ Zatop 2 statki (w tym "Róży Pąk")';
+                q1.classList.add('completed');
+            }
+            if (quests.capturedShips >= 2) {
+                q2.innerHTML = '✅ Przejmij 2 statki przez abordaż';
+                q2.classList.add('completed');
+            }
+            
+            if (quests.sunkShips >= 2 && quests.sunkRozyPak && quests.capturedShips >= 2) {
+                showAchievement('🏆 MISTRZ MÓRZ', 'Ukończono wszystkie zadania!');
+            }
+        }
+
+        function showAchievement(title, desc) {
+            const achDiv = document.getElementById('achievements');
+            achDiv.style.display = 'block';
+            const ach = document.createElement('div');
+            ach.className = 'achievement';
+            ach.innerHTML = `<b>${title}</b><br>${desc}`;
+            achDiv.appendChild(ach);
+            setTimeout(() => {
+                ach.remove();
+                if (achDiv.children.length === 0) achDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        function rollDice() {
+            boardingFight.waitingForRoll = false;
+            boardingFight.animating = true;
+            
+            boardingFight.playerRoll = Math.floor(Math.random() * 6) + 1;
+            boardingFight.enemyRoll = Math.floor(Math.random() * 6) + 1;
+            
+            setTimeout(() => {
+                boardingFight.animating = false;
+                setTimeout(() => {
+                    if (boardingFight.playerRoll > boardingFight.enemyRoll) {
+                        finishBoarding(true);
+                    } else if (boardingFight.enemyRoll > boardingFight.playerRoll) {
+                        finishBoarding(false);
+                    } else {
+                        boardingFight.playerRoll = 0;
+                        boardingFight.enemyRoll = 0;
+                        boardingFight.waitingForRoll = true;
+                        boardingFight.message = 'REMIS! Rzucamy ponownie!';
+                    }
+                }, 1500);
+            }, 1000);
+        }
+        
+        function finishBoarding(won) {
+            if (won) {
+                const enemy = boardingFight.currentEnemy;
+                enemy.alive = false;
+                alliedShips.push({ 
+                    name: enemy.name + ' (Sojusznik)', 
+                    x: enemy.x, 
+                    y: enemy.y, 
+                    hp: enemy.hp, 
+                    maxHp: enemy.maxHp,
+                    cannons: [1,1,1,1,1,1,1,1,1,1]
+                });
+                quests.capturedShips++;
+                checkQuests();
+                boardingFight.message = 'ZWYCIĘSTWO! Statek przejęty!';
+                showAchievement('⚔️ ABORDAŻ!', `Przejęto ${enemy.name}!`);
+                setTimeout(() => { gameState = 'battle'; }, 2000);
+            } else {
+                playerShip.hp -= 75;
+                if (playerShip.hp <= 0) {
+                    gameState = 'gameover';
+                } else {
+                    boardingFight.message = 'PORAŻKA! Tracisz 75 HP!';
+                    setTimeout(() => { gameState = 'battle'; }, 2000);
+                }
+            }
+        }
+
+        function update() {
+            if (gameState === 'story') {
+                storyTimer++;
+            }
+            
+            if (gameState === 'battle') {
+                if (keys['a'] || keys['A']) playerShip.speedX = -5;
+                else if (keys['d'] || keys['D']) playerShip.speedX = 5;
+                else playerShip.speedX *= 0.9;
+
+                if (keys['w'] || keys['W']) playerShip.speedY = -5;
+                else if (keys['s'] || keys['S']) playerShip.speedY = 5;
+                else playerShip.speedY *= 0.9;
+                
+                playerShip.x += playerShip.speedX;
+                playerShip.y += playerShip.speedY;
+                playerShip.x = Math.max(60, Math.min(1140, playerShip.x));
+                playerShip.y = Math.max(60, Math.min(640, playerShip.y));
+                
+                if (playerShip.cannonCooldown > 0) playerShip.cannonCooldown--;
+
+                fogOffset += 0.6;
+
+                alliedShips.forEach(ally => {
+                    const dx = playerShip.x - ally.x;
+                    const dy = playerShip.y - ally.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (dist > 120) {
+                        ally.x += (dx / dist) * 2.5;
+                        ally.y += (dy / dist) * 2.5;
+                    }
+                });
+
+                enemyShips.forEach(e => {
+                    if (e.alive) {
+                        if (e.fleeing) {
+                            e.y -= 6;
+                            e.x += (e.x < 600 ? -4 : 4);
+                        } else {
+                            const dy = playerShip.y - e.y;
+                            const targetY = playerShip.y + Math.sin(Date.now() / 1500 + e.shootTimer) * 30;
+                            e.y += (targetY - e.y) * 0.03;
+                            e.x += Math.sin(Date.now() / 2000 + e.shootTimer) * 1.5;
+                        }
+                    }
+                });
+
+                for (let i = 0; i < enemyShips.length; i++) {
+                    for (let j = i + 1; j < enemyShips.length; j++) {
+                        const e1 = enemyShips[i];
+                        const e2 = enemyShips[j];
+                        if (e1.alive && e2.alive && !e1.fleeing && !e2.fleeing) {
+                            const dx = e2.x - e1.x;
+                            const dy = e2.y - e1.y;
+                            const dist = Math.sqrt(dx*dx + dy*dy);
+                            if (dist < 100) {
+                                e1.x -= (dx / dist) * 2;
+                                e2.x += (dx / dist) * 2;
+                            }
+                        }
+                    }
+                }
+
+                enemyShips.forEach(e => {
+                    const dx = playerShip.x - e.x;
+                    const dy = playerShip.y - e.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    if (e.alive && !e.fleeing && dist < 90) {
+                        e.x -= (dx / dist) * 3;
+                        e.y -= (dy / dist) * 3;
+                    }
+                });
+
+                cannonballs = cannonballs.filter(b => {
+                    b.x += b.vx;
+                    b.y += b.vy;
+                    let hit = false;
+                    enemyShips.forEach(e => {
+                        if (e.alive && Math.abs(b.x - e.x) < 45 && Math.abs(b.y - e.y) < 45) {
+                            e.hp -= 20;
+                            if (e.hp <= 0) {
+                                e.alive = false;
+                                quests.sunkShips++;
+                                if (e.isRozyPak) {
+                                    quests.sunkRozyPak = true;
+                                    showAchievement('💀 RÓŻY PĄK', 'Zatopiłeś Róży Pąk!');
+                                }
+                                checkQuests();
+                            }
+                            hit = true;
+                        }
+                    });
+                    return b.x > 0 && b.x < 1200 && b.y > 0 && b.y < 700 && !hit;
+                });
+
+                enemyShips.forEach(e => {
+                    if (e.alive && !e.fleeing) {
+                        e.shootTimer++;
+                        if (e.shootTimer > 110) {
+                            const side = e.x < playerShip.x ? 'right' : 'left';
+                            const startIdx = side === 'left' ? 0 : 5;
+                            const endIdx = side === 'left' ? 5 : 10;
+                            let idx = -1;
+                            for (let i = startIdx; i < endIdx; i++) {
+                                if (e.cannons[i] === 1) {
+                                    idx = i;
+                                    break;
+                                }
+                            }
+                            if (idx !== -1) {
+                                e.cannons[idx] = 0;
+                                const isLeft = idx < 5;
+                                const vx = isLeft ? -7 : 7;
+                                const offsetX = isLeft ? -35 : 35;
+                                enemyCannonballs.push({ x: e.x + offsetX, y: e.y, vx: vx, vy: 0 });
+                            } else {
+                                e.cannons = [1,1,1,1,1,1,1,1,1,1];
+                            }
+                            e.shootTimer = 0;
+                        }
+                    }
+                });
+
+                enemyCannonballs = enemyCannonballs.filter(b => {
+                    b.x += b.vx;
+                    b.y += b.vy;
+                    if (Math.abs(b.x - playerShip.x) < 35 && Math.abs(b.y - playerShip.y) < 35) {
+                        playerShip.hp -= 20;
+                        return false;
+                    }
+                    for (let ally of alliedShips) {
+                        if (Math.abs(b.x - ally.x) < 35 && Math.abs(b.y - ally.y) < 35) {
+                            ally.hp -= 20;
+                            if (ally.hp <= 0) {
+                                alliedShips = alliedShips.filter(a => a !== ally);
+                            }
+                            return false;
+                        }
+                    }
+                    return b.x > 0 && b.x < 1200 && b.y > 0 && b.y < 700;
+                });
+
+                const aliveEnemies = enemyShips.filter(e => e.alive && !e.fleeing).length;
+                
+                if (waveNumber === 3 && aliveEnemies === 3) {
+                    let fleeStarted = false;
+                    enemyShips.forEach(e => {
+                        if (e.alive && !e.fleeing) {
+                            e.fleeing = true;
+                            if (!fleeStarted) {
+                                showAchievement('🏃 UCIECZKA!', 'Reszta piratów ucieka!');
+                                fleeStarted = true;
+                            }
+                        }
+                    });
+                }
+                
+                enemyShips = enemyShips.filter(e => !e.fleeing || e.y > -100);
+
+                if (aliveEnemies === 0 && enemyShips.length > 0) {
+                    enemyShips = [];
+                    if (waveNumber === 1) {
+                        setTimeout(() => spawnWave(2), 2500);
+                    } else if (waveNumber === 2) {
+                        setTimeout(() => spawnWave(3), 2500);
+                    } else if (waveNumber === 3) {
+                        if (quests.sunkShips >= 2 && quests.sunkRozyPak && quests.capturedShips >= 2) {
+                            gameState = 'ending';
+                            englandX = 0;
+                        } else {
+                            gameState = 'incomplete';
+                        }
+                    }
+                }
+
+                if (playerShip.hp <= 0) {
+                    gameState = 'gameover';
+                }
+            }
+            
+            if (gameState === 'ending') {
+                englandX += 2;
+            }
+        }
+
+        function draw() {
+            const gradient = ctx.createLinearGradient(0, 0, 0, 700);
+            gradient.addColorStop(0, '#0a1a3a');
+            gradient.addColorStop(0.5, '#1e3a5f');
+            gradient.addColorStop(1, '#0d2847');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 1200, 700);
+
+            ctx.fillStyle = 'rgba(42, 90, 138, 0.4)';
+            for (let i = 0; i < 35; i++) {
+                const y = (i * 30 + Date.now() / 50) % 700;
+                ctx.fillRect(0, y, 1200, 2);
+            }
+
+            ctx.fillStyle = 'rgba(220, 220, 230, 0.25)';
+            for (let i = 0; i < 10; i++) {
+                ctx.beginPath();
+                ctx.arc((i * 200 + fogOffset) % 1400 - 100, 100 + i * 70, 120, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            if (gameState === 'story') {
+                ctx.fillStyle = 'rgba(0,0,0,0.7)';
+                ctx.fillRect(0, 0, 1200, 700);
+                ctx.fillStyle = '#fff';
+                ctx.font = '32px Arial';
+                
+                if (storyPhase === 0) {
+                    ctx.fillText('To 24 był lutego, poranna wzrzedła mgła', 250, 300);
+                } else if (storyPhase === 1) {
+                    ctx.fillText('a wszło z niej siedem uzbrojonych krypt', 250, 300);
+                } else if (storyPhase === 2) {
+                    ctx.fillText('turecki niosły znak', 420, 300);
+                }
+                
+                ctx.fillStyle = '#ffff00';
+                ctx.font = '20px Arial';
+                ctx.fillText('Wciśnij SPACJĘ', 520, 650);
+            }
+
+            if (gameState === 'battle') {
+                enemyShips.forEach(e => {
+                    if (e.alive) {
+                        drawShip(e.x, e.y, '#8b0000', false);
+                        ctx.fillStyle = '#fff';
+                        ctx.font = '16px Arial';
+                        if (e.fleeing) {
+                            ctx.fillStyle = '#ffff00';
+                            ctx.fillText(e.name + ' (UCIEKA!)', e.x - 60, e.y - 80);
+                        } else {
+                            ctx.fillText(e.name, e.x - 50, e.y - 80);
+                        }
+                        ctx.fillStyle = '#ff0000';
+                        ctx.fillRect(e.x - 35, e.y - 70, 70, 6);
+                        ctx.fillStyle = '#00ff00';
+                        ctx.fillRect(e.x - 35, e.y - 70, (e.hp / e.maxHp) * 70, 6);
+                    }
+                });
+
+                alliedShips.forEach(ally => {
+                    drawShip(ally.x, ally.y, '#2e8b57', false);
+                    ctx.fillStyle = '#0f0';
+                    ctx.font = '14px Arial';
+                    ctx.fillText(ally.name, ally.x - 60, ally.y - 80);
+                    ctx.fillStyle = '#ff0000';
+                    ctx.fillRect(ally.x - 35, ally.y - 70, 70, 6);
+                    ctx.fillStyle = '#00ff00';
+                    ctx.fillRect(ally.x - 35, ally.y - 70, (ally.hp / ally.maxHp) * 70, 6);
+                });
+
+                drawShip(playerShip.x, playerShip.y, '#8b4513', false);
+                
+                ctx.fillStyle = '#ff0000';
+                ctx.fillRect(playerShip.x - 35, playerShip.y - 70, 70, 6);
+                ctx.fillStyle = '#00ff00';
+                ctx.fillRect(playerShip.x - 35, playerShip.y - 70, (playerShip.hp / 100) * 70, 6);
+
+                cannonballs.forEach(b => {
+                    ctx.fillStyle = '#2c2c2c';
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                });
+
+                enemyCannonballs.forEach(b => {
+                    ctx.fillStyle = '#2c2c2c';
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = '#000';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                });
+
+                ctx.fillStyle = '#fff';
+                ctx.font = '16px Arial';
+                for (let i = 0; i < 10; i++) {
+                    const color = playerShip.cannons[i] ? '#0f0' : '#f00';
+                    ctx.fillStyle = color;
+                    const label = i < 9 ? (i + 1) : '0';
+                    ctx.fillText(label, 30 + i * 30, 680);
+                }
+
+                const nearEnemy = enemyShips.find(e => e.alive && !e.fleeing && Math.abs(e.x - playerShip.x) < 90 && Math.abs(e.y - playerShip.y) < 90);
+                if (nearEnemy) {
+                    ctx.fillStyle = '#ffff00';
+                    ctx.font = '28px Arial';
+                    ctx.fillText('⚔️ SPACJA - ABORDAŻ! ⚔️', 420, 60);
+                }
+
+                info.innerHTML = `❤️ HP: ${playerShip.hp} | 🌊 Fala: ${waveNumber}/3 | ☠️ Wrogów: ${enemyShips.filter(e => e.alive && !e.fleeing).length} | 🙈 Porwanych: ${alliedShips.length}`;
+            }
+
+            if (gameState === 'boarding') {
+                ctx.fillStyle = 'rgba(0,0,0,0.9)';
+                ctx.fillRect(0, 0, 1200, 700);
+                ctx.fillStyle = '#fff';
+                ctx.font = '40px Arial';
+                ctx.fillText('⚔️ ABORDAŻ ⚔️', 480, 90);
+                
+                if (boardingFight.waitingForRoll) {
+                    ctx.font = '28px Arial';
+                    ctx.fillStyle = '#ffff00';
+                    ctx.fillText(boardingFight.message, 350, 350);
+                } else {
+                    const alpha = boardingFight.animating ? Math.sin(Date.now() / 100) * 0.3 + 0.7 : 1;
+                    
+                    ctx.globalAlpha = alpha;
+                    ctx.fillStyle = boardingFight.playerRoll > boardingFight.enemyRoll ? '#00ff00' : (boardingFight.playerRoll < boardingFight.enemyRoll ? '#ff0000' : '#fff');
+                    ctx.font = '80px Arial';
+                    ctx.fillText('🎲', 450, 280);
+                    ctx.font = '60px Arial';
+                    ctx.fillText(boardingFight.playerRoll, 480, 270);
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '24px Arial';
+                    ctx.fillText('TY', 490, 320);
+                    
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '32px Arial';
+                    ctx.fillText('vs', 580, 380);
+                    
+                    ctx.fillStyle = boardingFight.enemyRoll > boardingFight.playerRoll ? '#00ff00' : (boardingFight.enemyRoll < boardingFight.playerRoll ? '#ff0000' : '#fff');
+                    ctx.font = '80px Arial';
+                    ctx.fillText('🎲', 450, 500);
+                    ctx.font = '60px Arial';
+                    ctx.fillText(boardingFight.enemyRoll, 480, 490);
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '24px Arial';
+                    ctx.fillText('WRÓG', 470, 540);
+                    ctx.globalAlpha = 1;
+                    
+                    if (!boardingFight.animating) {
+                        ctx.font = '32px Arial';
+                        if (boardingFight.playerRoll > boardingFight.enemyRoll) {
+                            ctx.fillStyle = '#0f0';
+                            ctx.fillText('ZWYCIĘSTWO! Statek przejęty!', 350, 620);
+                        } else if (boardingFight.enemyRoll > boardingFight.playerRoll) {
+                            ctx.fillStyle = '#f00';
+                            ctx.fillText('PORAŻKA! Tracisz 75 HP!', 380, 620);
+                        }
+                    }
+                }
+            }
+
+            if (gameState === 'ending') {
+                ctx.fillStyle = 'rgba(0,0,0,0.8)';
+                ctx.fillRect(0, 0, 1200, 700);
+                
+                ctx.fillStyle = '#228b22';
+                ctx.fillRect(1200 - englandX, 0, 400, 700);
+                
+                ctx.fillStyle = '#654321';
+                for (let i = 0; i < 5; i++) {
+                    ctx.fillRect(1220 - englandX + i * 60, 500, 15, 200);
+                }
+                
+                ctx.fillStyle = '#fff';
+                ctx.font = '48px Arial';
+                ctx.fillText('🏴󠁧󠁢󠁥󠁮󠁧󠁿 ANGLIA! 🏴󠁧󠁢󠁥󠁮󠁧󠁿', 450, 200);
+                ctx.font = '32px Arial';
+                ctx.fillText('Dopłynąłeś do brzegów Anglii!', 350, 280);
+                ctx.font = '24px Arial';
+                ctx.fillText('Razem bracia aż po zmierzch! 🍺', 380, 340);
+                ctx.fillText(`Przejętych statków: ${alliedShips.length}`, 450, 400);
+                
+                if (englandX > 300) {
+                    alliedShips.forEach((ally, i) => {
+                        drawShip(200 + i * 150, 550, '#2e8b57', false);
+                    });
+                    drawShip(600, 600, '#8b4513', false);
+                }
+                
+                ctx.fillStyle = '#ffff00';
+                ctx.font = '20px Arial';
+                ctx.fillText('Wciśnij SPACJĘ aby zagrać ponownie', 420, 670);
+            }
+
+            if (gameState === 'incomplete') {
+                ctx.fillStyle = 'rgba(0,0,0,0.9)';
+                ctx.fillRect(0, 0, 1200, 700);
+                ctx.fillStyle = '#ff0';
+                ctx.font = '42px Arial';
+                ctx.fillText('⚠️ ZADANIA NIEUKOŃCZONE! ⚠️', 300, 300);
+                ctx.fillStyle = '#fff';
+                ctx.font = '24px Arial';
+                ctx.fillText('Nie ukończyłeś wszystkich zadań!', 380, 360);
+                ctx.fillText('Spróbuj ponownie...', 480, 400);
+                setTimeout(() => location.reload(), 3000);
+            }
+
+            if (gameState === 'gameover') {
+                ctx.fillStyle = 'rgba(0,0,0,0.9)';
+                ctx.fillRect(0, 0, 1200, 700);
+                ctx.fillStyle = '#f00';
+                ctx.font = '56px Arial';
+                ctx.fillText('💀 PORAŻKA 💀', 420, 320);
+                ctx.fillStyle = '#fff';
+                ctx.font = '28px Arial';
+                ctx.fillText('Poszedłeś na dno...', 480, 380);
+                ctx.fillStyle = '#ffff00';
+                ctx.font = '20px Arial';
+                ctx.fillText('Odśwież stronę aby zagrać ponownie', 410, 450);
+            }
+        }
+
+        function drawShip(x, y, color, isPlayer) {
+            ctx.save();
+            ctx.translate(x, y);
+            
+            ctx.fillStyle = color;
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(-40, 20);
+            ctx.lineTo(40, 20);
+            ctx.lineTo(35, -20);
+            ctx.lineTo(-35, -20);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.fillStyle = '#3d2817';
+            ctx.fillRect(-4, -50, 8, 30);
+            ctx.strokeRect(-4, -50, 8, 30);
+            
+            ctx.fillStyle = color === '#8b4513' ? '#ffffff' : (color === '#2e8b57' ? '#90ee90' : '#8b0000');
+            ctx.beginPath();
+            ctx.moveTo(4, -45);
+            ctx.lineTo(35, -30);
+            ctx.lineTo(35, -10);
+            ctx.lineTo(4, -25);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+    </script>
+</body>
+</html>
